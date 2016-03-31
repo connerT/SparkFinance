@@ -1,10 +1,24 @@
 package com.sparkfinance.util;
 
-import static org.testng.Assert.*;
+import org.testng.annotations.BeforeTest;
+import org.testng.annotations.Test;
 
-/**
- * Created by connertolley on 3/29/16.
- */
+import static org.testng.Assert.assertEquals;
+
+
 public class StateConstantsTest {
+
+    StateConstants sc;
+
+    @BeforeTest
+    void setup() {
+        sc = new StateConstants();
+    }
+
+    @Test
+    public void testAbbreviationToFullName() {
+        String fullName = sc.abbreviationToFullName("WV");
+        assertEquals(fullName, "West Virginia");
+    }
 
 }
