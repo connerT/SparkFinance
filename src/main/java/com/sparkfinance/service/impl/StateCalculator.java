@@ -1,6 +1,7 @@
 package com.sparkfinance.service.impl;
 
 
+import com.sparkfinance.model.SalaryResults;
 import com.sparkfinance.util.StateConstants;
 import org.apache.commons.lang3.StringUtils;
 import org.json.simple.JSONArray;
@@ -52,21 +53,21 @@ public class StateCalculator extends TaxCalculator {
 
         }
 
-    public void calculate(String year, BigDecimal payRate, int payPeriods, String filingStatus, String state) {
-        BigDecimal income = payRate.multiply(BigDecimal.valueOf(payPeriods));
-        BigDecimal stateTaxAmount = getStateTaxAmount(year, income, filingStatus, state);
-
-    }
+//    public void calculate(String year, BigDecimal salary, int payPeriods, String filingStatus, String state) {
+//        BigDecimal income = salary.multiply(BigDecimal.valueOf(payPeriods));
+//        SalaryResults results = getStateTaxAmount(sal);
+//
+//    }
 
     private JSONObject getDataFromFilingStatus(JSONObject data, String filingStatus) {
         JSONObject targetTable = (JSONObject) data.get(filingStatus);
         return targetTable;
     }
 
-    public BigDecimal getStateTaxAmount(String year, BigDecimal income, String filingStatus, String stateAbbr) {
-        StateResponse sr = getStateData(year, stateAbbr);
+    public SalaryResults getStateTaxAmount(SalaryResults sal) {
+        StateResponse sr = getStateData(sal.getYear(), sal.getState());
         JSONObject jobj = (JSONObject) sr.getData();
-        JSONObject targetTable = getDataFromFilingStatus(jobj, filingStatus);
+        JSONObject targetTable = getDataFromFilingStatus(jobj, sal.getFilingStatus());
         BigDecimal amount = BigDecimal.ZERO;
         BigDecimal deductionAmount = BigDecimal.ZERO;
 
@@ -77,7 +78,6 @@ public class StateCalculator extends TaxCalculator {
                 JSONObject deduction = (JSONObject) i.next();
                 Long stateDeductionAmount = (Long) deduction.get("deduction_amount");
                 deductionAmount.add(new BigDecimal(stateDeductionAmount));
-                System.out.println("The deduction amount is now: " + deductionAmount);
             }
         }
 
@@ -88,6 +88,7 @@ public class StateCalculator extends TaxCalculator {
             //$exemptions = $target_table->exemptions->personal;
         }
 
+        BigDecimal income = sal.getSalary();
         BigDecimal adjustedIncome = income.subtract(deductionAmount).subtract(excemptionAmount);
         if (adjustedIncome.compareTo(BigDecimal.ZERO) < 0) {
             adjustedIncome = BigDecimal.ZERO;
@@ -97,7 +98,8 @@ public class StateCalculator extends TaxCalculator {
         if (StringUtils.isNotBlank(type)
                 && (StringUtils.equalsIgnoreCase("none", type)
                 || StringUtils.equalsIgnoreCase(type, "TODO UNKNOWN!"))) {
-                return amount;
+                sal.setStateTax(amount);
+                return sal;
         } else {
             JSONArray brackets = (JSONArray) targetTable.get("income_tax_brackets");
             for (int j = 0 ; j < brackets.size(); j++) {
@@ -131,7 +133,8 @@ public class StateCalculator extends TaxCalculator {
         }
 
         amount = amount.setScale(2, RoundingMode.CEILING);
-        return amount;
+        sal.setStateTax(amount);
+        return sal;
     }
 
 }

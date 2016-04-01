@@ -1,5 +1,7 @@
 package com.sparkfinance.service.impl;
 
+import com.sparkfinance.model.SalaryResults;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -17,37 +19,57 @@ public class SalaryService {
     final BigDecimal FED_TAX_35 = BigDecimal.valueOf(0.35); // $405,101 - $406,750
     final BigDecimal FED_TAX_39 = BigDecimal.valueOf(0.396); // > $406,750
 
-    public BigDecimal getRealSalary(String year, String salaryString, String state, String fourOoneK, String timePeriod, String filingStatus) {
-        BigDecimal takeHomePay = BigDecimal.valueOf(0);
+    public SalaryResults getRealSalary(String year, String salaryString, String state, String fourOoneK, String timePeriod, String filingStatus) {
         salaryString = sanitizeString(salaryString);
-        BigDecimal salary = new BigDecimal(salaryString);
+        SalaryResults salResults = new SalaryResults();
+        salResults.setSalary(new BigDecimal(salaryString));
+        salResults.setFilingStatus(filingStatus);
+        salResults.setState(state);
+        salResults.setYear("2014");
+        salResults.setTimePeriod(timePeriod);
+        salResults.setFourOoneKpercentage(new BigDecimal(fourOoneK));
         try {
+            //validate salary is not less than zero
+            salResults = validateSalary(salResults);
             //subtract 401K first
-            takeHomePay = getSalaryAfter401k(salary, fourOoneK);
-            //then subtract federal taxes
-            BigDecimal fedTax = getFedTax(takeHomePay);
-            //then subtract state taxes
-            BigDecimal stateTax = getStateTax(takeHomePay, filingStatus, state, year);
-            // Divide amount by time period requested
-            takeHomePay = takeHomePay.subtract(fedTax).subtract(stateTax);
-            takeHomePay = getSalaryPerTimerPeriod(timePeriod, takeHomePay);
+            salResults = getSalaryAfter401k(salResults);
+            //then get federal taxes
+            salResults = getFedTax(salResults);
+            //then get state taxes
+            salResults = getStateTax(salResults);
+            // Get salary so far (minus 401k)
+            BigDecimal sal = salResults.getSalary();
+            // Subtract Federal tax
+            sal = sal.subtract(salResults.getFederalTax());
+            // Subtract State tax
+            sal = sal.subtract(salResults.getStateTax());
+            // Set the "real" income before dividing by pay periods
+            salResults.setSalary(sal);
+            // Divide by the time period
+            salResults = getSalaryPerTimerPeriod(salResults);
+            // Set the final(real) income
+            salResults.setRealIncome(salResults.getSalary());
         } catch (NumberFormatException ex) {
             System.out.println("You must enter a number for your income");
+        } catch (IllegalArgumentException ex) {
+            System.out.println("An illegal argument exception has occured");
         } catch (Exception ex) {
             System.out.println("An unexpected exception has occurred");
         }
 
-        return takeHomePay;
+        return salResults;
     }
 
-    private BigDecimal getStateTax(BigDecimal takeHomePay, String filingStatus, String state, String year) {
+    private SalaryResults getStateTax(SalaryResults sal) {
         StateCalculator sc = new StateCalculator();
-        BigDecimal stateTaxAmount = sc.getStateTaxAmount(year, takeHomePay, filingStatus, state);
-        return stateTaxAmount;
+        SalaryResults results = sc.getStateTaxAmount(sal);
+        return results;
     }
 
-    public BigDecimal getSalaryPerTimerPeriod(String timePeriod, BigDecimal salary) {
-        salary = validateSalary(salary);
+    public SalaryResults getSalaryPerTimerPeriod(SalaryResults sal) {
+
+        String timePeriod = StringUtils.upperCase(sal.getTimePeriod());
+        BigDecimal salary = sal.getSalary();
         switch (timePeriod) {
             case "WEEK":
                 salary = salary.divide(new BigDecimal(52), 2);
@@ -64,7 +86,8 @@ public class SalaryService {
             default:
                 throw new IllegalArgumentException("Invalid time period: " + timePeriod);
         }
-        return salary;
+        sal.setSalary(salary);
+        return sal;
     }
 
     private String sanitizeString(String s) {
@@ -73,32 +96,42 @@ public class SalaryService {
         return s;
     }
 
-    private BigDecimal validateSalary(BigDecimal salary) {
+    private SalaryResults validateSalary(SalaryResults sal) {
+        BigDecimal salary = sal.getSalary();
         if (salary.compareTo(BigDecimal.ZERO) <= 0) {
+            sal.setSuccess(false);
+            sal.setReason("Salary cannot be zero or less");
             throw new IllegalArgumentException("Salary cannot be less than or equal to zero");
         }
-        return salary;
+        return sal;
     }
 
-    public BigDecimal getSalaryAfter401k(BigDecimal salary, String fourOoneK) {
-        BigDecimal income = salary;
-        BigDecimal fourK = new BigDecimal(fourOoneK);
-        BigDecimal fourKdecimal = fourK.divide(new BigDecimal(100));
-        BigDecimal amountToSubtract = income.multiply(fourKdecimal);
-        BigDecimal endAmount = income.subtract(amountToSubtract);
-        return endAmount;
+    public SalaryResults getSalaryAfter401k(SalaryResults sal) {
+        BigDecimal income = sal.getSalary();
+        BigDecimal fourK = sal.getFourOoneKpercentage();
+        if (fourK.compareTo(BigDecimal.ZERO) > 0) {
+            BigDecimal fourKdecimal = fourK.divide(new BigDecimal(100));
+            BigDecimal amountToSubtract = income.multiply(fourKdecimal);
+            BigDecimal endAmount = income.subtract(amountToSubtract);
+            sal.setSalary(endAmount);
+        } else {
+            // don't do anything
+        }
+        return sal;
     }
 
-    public BigDecimal getFedTax(BigDecimal salary) {
-        BigDecimal taxRate = getFedTaxRate(salary);
-        BigDecimal tax = salary.multiply(taxRate);
+    public SalaryResults getFedTax(SalaryResults sal) {
+        sal = getFedTaxRate(sal);
+        BigDecimal salary = sal.getSalary();
+        BigDecimal tax = salary.multiply(sal.getFedTaxRate());
         tax = tax.setScale(2, RoundingMode.CEILING);
-        return tax;
+        sal.setFederalTax(tax);
+        return sal;
     }
 
-    public BigDecimal getFedTaxRate(BigDecimal salary) {
+    public SalaryResults getFedTaxRate(SalaryResults sal) {
 
-        salary = validateSalary(salary);
+        BigDecimal salary = sal.getSalary();
         BigDecimal taxRate = BigDecimal.ZERO;
 
         if (salary.compareTo(BigDecimal.ZERO) >= 0 &&
@@ -122,6 +155,19 @@ public class SalaryService {
         } else {
             taxRate = FED_TAX_39;
         }
-        return taxRate;
+
+        sal.setFedTaxRate(taxRate);
+        return sal;
+    }
+
+    public SalaryResults getStateIncomeTax(String stateAbbr, BigDecimal incomeBD, String filingStatus) {
+        SalaryResults sr = new SalaryResults();
+        sr.setState(stateAbbr);
+        sr.setSalary(incomeBD);
+        sr.setFilingStatus(filingStatus);
+        sr.setYear("2014");
+        StateCalculator sc = new StateCalculator();
+        sr = sc.getStateTaxAmount(sr);
+        return sr;
     }
 }
